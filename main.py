@@ -58,7 +58,7 @@ if __name__ == '__main__':
     else:
         test_model_ckpt_path = config.ckpt_path
         if test_model_ckpt_path is None:
-            print("Trained model checkpoint requried. Exit program")
+            print("Trained model checkpoint required. Exit program")
             exit()
         else:
             solver.test(test_model_ckpt_path)
