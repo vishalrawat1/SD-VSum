@@ -200,7 +200,7 @@ class Solver(object):
 
         print("------------------------------------------------------")
         print(f"   TEST RESULT on {ckpt_path}: ")
-        print('   TEST MRHiSum F-score {0:0.5}'.format(test_fscore))
+        print('   TEST S-VideoXum F-score {0:0.5}'.format(test_fscore))
         print("------------------------------------------------------")
 
         f = open(os.path.join(self.config.save_dir_root, 'results.txt'), 'a')
