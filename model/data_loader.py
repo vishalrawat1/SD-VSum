@@ -4,15 +4,20 @@ from torch.utils.data import Dataset, DataLoader
 import h5py
 import numpy as np
 import json
+import os
 
 
 class VideoData(Dataset):
-    def __init__(self, mode, dataset='S_VideoXum', split_num=0):
-        """ Custom Dataset class wrapper for loading the frame features, text features and ground truth importance scores.
-        :param str mode: The mode of the model, train, val or test.
-        :param str dataset: The name of the dataset: ['S_VideoXum' | 'S_NewsVSum']
+    def __init__(self, mode, dataset='S_NewsVSum', split_num=0):
         """
-        self.mode = mode
+        Dataset loader for SD-VSum (Kaggle compatible)
+        mode: train | val | test
+        dataset: S_VideoXum | S_NewsVSum
+        """
+
+        self.mode = mode.lower()
+
+        # -------- Dataset paths --------
         if dataset == 'S_VideoXum':
             self.filename = './dataset/script_videoxum.h5'
             self.dataset_split = './dataset/script_videoxum_split.json'
@@ -20,58 +25,80 @@ class VideoData(Dataset):
         elif dataset == 'S_NewsVSum':
             self.filename = './dataset/S_NewsVSum.h5'
             self.dataset_split = './dataset/S_NewsVSum_split.json'
+
         else:
-            raise ValueError("Error: no valid dataset. Must be: ['S_VideoXum' | 'S_NewsVSum']")
+            raise ValueError("Dataset must be S_VideoXum or S_NewsVSum")
+
+        # -------- Load split file --------
+        with open(self.dataset_split, 'r') as f:
+            splits = json.load(f)
+
+        # S_NewsVSum has multiple splits
+        if dataset == 'S_NewsVSum':
+            splits = splits[split_num]
+
+        self.split_keys = splits[self.mode]
+
+        # -------- Load HDF5 --------
         hdf = h5py.File(self.filename, 'r')
 
-        with open(self.dataset_split, 'r') as f:
-            keys = json.load(f)
-        if dataset == 'S_NewsVSum':
-            keys = keys[split_num]
-
-        self.list_video_features, self.list_text_features, self.list_gtscores, self.list_video_name = [], [], [], []
+        self.video_features = []
+        self.text_features = []
+        self.gt_scores = []
+        self.video_names = []
 
         for video_name in hdf.keys():
-            if video_name in keys[self.mode]:
-                video_features = torch.Tensor(np.array(hdf[video_name + '/video_embeddings'][()]))
-                text_features = torch.Tensor(np.array(hdf[video_name + '/text_embeddings'][()]))
-                gtscore = torch.Tensor(np.array(hdf[video_name + '/gtscores']))
+            if video_name not in self.split_keys:
+                continue
 
-                self.list_video_name.append(video_name)
-                self.list_video_features.append(video_features)
-                self.list_text_features.append(text_features)
-                self.list_gtscores.append(gtscore)
+            grp = hdf[video_name]
+
+            # ---- embeddings ----
+            video_emb = torch.tensor(grp['video_embeddings'][()], dtype=torch.float32)
+            text_emb = torch.tensor(grp['text_embeddings'][()], dtype=torch.float32)
+
+            # ---- ground truth (robust) ----
+            if 'gtscores' in grp:
+                gt = grp['gtscores'][()]
+            elif 'scores' in grp:
+                gt = grp['scores'][()]
+            elif 'labels' in grp:
+                gt = grp['labels'][()]
+            else:
+                raise KeyError(f"No GT scores found for video: {video_name}")
+
+            gt = torch.tensor(gt, dtype=torch.float32)
+
+            self.video_features.append(video_emb)
+            self.text_features.append(text_emb)
+            self.gt_scores.append(gt)
+            self.video_names.append(video_name)
 
         hdf.close()
 
+        print(f"[INFO] Loaded {len(self.video_names)} samples for {mode}")
+
     def __len__(self):
-        """ Function to be called for the `len` operator of the dataset. """
-        return len(self.list_video_name)
+        return len(self.video_names)
 
-    def __getitem__(self, index):
-        """ Function to be called for the index operator of the dataset.
-        :param int index: The above-mentioned id of the data.
-        """
-        video_features = self.list_video_features[index]
-        text_features = self.list_text_features[index]
-        gtscore = self.list_gtscores[index]
-        return video_features, text_features, gtscore
+    def __getitem__(self, idx):
+        return (
+            self.video_features[idx],
+            self.text_features[idx],
+            self.gt_scores[idx]
+        )
 
 
-def get_loader(mode, dataset='S_VideoXum', split_num=0):
-    """ Loads the dataset.
-    Wrapped by a Dataloader, shuffled and `batch_size` = 1 in train `mode`.
-
-    :param str mode: The mode of the model, train or test.
-    :param str dataset: The name of the dataset: ['S_VideoXum' | 'S_NewsVSum']
-    :return: The dataset used in each mode.
+def get_loader(mode, dataset='S_NewsVSum', split_num=0):
+    """
+    Returns PyTorch DataLoader
     """
     if mode.lower() == 'train':
-        vd = VideoData(mode, dataset=dataset)
-        return DataLoader(vd, batch_size=1, shuffle=True)
+        dataset_obj = VideoData(mode, dataset=dataset, split_num=split_num)
+        return DataLoader(dataset_obj, batch_size=1, shuffle=True)
     else:
-        return VideoData(mode)
+        return VideoData(mode, dataset=dataset, split_num=split_num)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     pass
