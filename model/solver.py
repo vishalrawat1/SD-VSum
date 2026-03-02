@@ -60,36 +60,37 @@ class Solver(object):
             if self.config.init_type is not None:
                 self.init_weights(self.model, init_type=self.config.init_type, init_gain=self.config.init_gain)
 
-
     def train(self):
-        """
-        Trains the summarization model over multiple epochs, tracking validation performance.
-        :return str: Path to the checkpoint with the best validation F1 score.
-        """
+    """
+    Trains the summarization model over multiple epochs, tracking validation performance.
+    :return str: Path to the checkpoint with the best validation F1 score.
+    """
         best_f1score = -1.0
         best_f1score_epoch = 0
-
+    
         loss_total = []
         f1score_total = []
-
+    
         val_f1score = self.evaluate(dataloader=self.val_loader)
         f1score_total.append(val_f1score)
-
+    
         f_score_path = os.path.join(self.config.save_dir_root, "val_f1score.txt")
         with open(f_score_path, "w") as file:
             file.write(f"{val_f1score}\n")
-
+    
         for epoch_i in range(self.config.epochs):
-            print("[Epoch: {0:6}]".format(str(epoch_i) + "/" + str(self.config.epochs)))
+            percent = int(((epoch_i + 1) / self.config.epochs) * 100)
+            print(f"Epoch {epoch_i+1}/{self.config.epochs} ({percent}%)")
+    
             self.model.train()
             loss_history = []
             num_batches = int(len(self.train_loader) / self.config.batch_size)
             iterator = iter(self.train_loader)
-
-            for _ in trange(num_batches, desc='Batch', ncols=80, leave=False):
+    
+            for _ in range(num_batches):
                 self.optimizer.zero_grad()
-
-                for _ in trange(self.config.batch_size, desc='Video', ncols=80, leave=False):
+    
+                for _ in range(self.config.batch_size):
                     video_embeddings, text_embeddings_full, gtscores = next(iterator)
                     video_embeddings = video_embeddings.to(self.config.device)
                     video_embeddings = video_embeddings.squeeze()
@@ -97,53 +98,52 @@ class Solver(object):
                     text_embeddings_full = text_embeddings_full.squeeze(0)
                     gtscores = gtscores.to(self.config.device)
                     gtscores = gtscores.squeeze(0)
-
+    
                     for i in range(self.config.annotations):
-
-                        if text_embeddings_full.ndim == 2: # in the case of S_NewsVSum
+                        if text_embeddings_full.ndim == 2:
                             text_embeddings_full = text_embeddings_full.unsqueeze(0)
                             gtscores = gtscores.unsqueeze(0)
-
+    
                         gtscore = gtscores[i]
                         text_embeddings = text_embeddings_full[i, :, :]
-                        mask = (text_embeddings.abs().sum(dim=1) != 0)  # remove zero padding
+                        mask = (text_embeddings.abs().sum(dim=1) != 0)
                         text_embeddings = text_embeddings[mask]
                         if text_embeddings.shape[0] == 0:
                             continue
+    
                         score = self.model(video_embeddings, text_embeddings)
-
                         loss = self.criterion(score.squeeze(0), gtscore.squeeze(0))
                         loss.backward()
                         loss_history.append(loss.data)
-
+    
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip)
                 self.optimizer.step()
-
+    
+            # evaluation (no printing)
             loss = torch.stack(loss_history).mean()
             val_f1score = self.evaluate(dataloader=self.val_loader)
             loss_total.append(loss)
             f1score_total.append(val_f1score)
+    
             with open(f_score_path, "a") as file:
                 file.write(f"{val_f1score}\n")
-
+    
             if best_f1score <= val_f1score:
                 best_f1score = val_f1score
                 best_f1score_epoch = epoch_i
-                f1_save_ckpt_path = os.path.join(self.config.best_f1score_save_dir, f'best_f1.pkl')
+                f1_save_ckpt_path = os.path.join(
+                    self.config.best_f1score_save_dir, "best_f1.pkl"
+                )
                 torch.save(self.model.state_dict(), f1_save_ckpt_path)
-
-
-            print("   [Epoch {0}] Train loss: {1:.05f}".format(epoch_i, loss))
-            print('    VAL  F-score {0:0.5} '.format(val_f1score))
-
-        print('   Best Val F1 score {0:0.5} @ epoch{1}'.format(best_f1score, best_f1score_epoch))
-
-        f = open(os.path.join(self.config.save_dir_root, 'results.txt'), 'a')
-        f.write('   Best Val F1 score {0:0.5} @ epoch{1}\n'.format(best_f1score, best_f1score_epoch))
-        f.flush()
-        f.close()
-
+    
+        print(f"Best Val F1 score {best_f1score:.5f} @ epoch {best_f1score_epoch}")
+    
+        with open(os.path.join(self.config.save_dir_root, 'results.txt'), 'a') as f:
+            f.write(f"Best Val F1 score {best_f1score:.5f} @ epoch {best_f1score_epoch}\n")
+    
         return f1_save_ckpt_path
+    
+    
 
     def evaluate(self, dataloader=None):
         """"
