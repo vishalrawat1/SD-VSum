@@ -61,10 +61,7 @@ class Solver(object):
                 self.init_weights(self.model, init_type=self.config.init_type, init_gain=self.config.init_gain)
 
     def train(self):
-    """
-    Trains the summarization model over multiple epochs, tracking validation performance.
-    :return str: Path to the checkpoint with the best validation F1 score.
-    """
+  
         best_f1score = -1.0
         best_f1score_epoch = 0
     
